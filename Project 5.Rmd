@@ -1,11 +1,30 @@
 ---
-title: "Project 5"
+title: "Machine Learning Project"
 author: "Baijayanti Chakraborty"
 date: "09/11/2019"
 output:
   word_document: default
   html_document: default
   pdf_document: default
+  
+This project requires you to understand what mode of transport employees prefers to commute to their office. The Cars.csv provided includes employee information about their mode of transport as well as their personal and professional details like age, salary, work exp. We need to predict whether or not an employee will use Car as a mode of transport. Also, which variables are a significant predictor behind this decision.
+The different steps taken to reach a conclusion :
+EDA 
+Perform an EDA on the data 
+Illustrate the insights based on EDA
+Check for Multicollinearity - Plot the graph based on Multicollinearity & treat it.
+Data Preparation
+Prepare the data for analysis (SMOTE)
+Modeling 
+Create multiple models and explore how each model perform using appropriate model performance metrics 
+KNN 
+Naive Bayes (is it applicable here? comment and if it is not applicable, how can you build an NB model in this case?)
+Logistic Regression
+Apply both bagging and boosting modeling procedures to create 2 models and compare its accuracy with the best model of the above step. 
+Actionable Insights & Recommendations 
+ Summarize your findings from the exercise in a concise yet actionable note
+
+  
 ---
 
 ```{r setup, include=TRUE}
