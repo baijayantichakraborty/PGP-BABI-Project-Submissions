@@ -1,0 +1,281 @@
+---
+title: "Project 5"
+author: "Baijayanti Chakraborty"
+date: "09/11/2019"
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=TRUE}
+
+#include the needed libraries
+library(DataExplorer)
+library(psych)
+library(ggplot2)
+library(dplyr)
+library(caret)
+library(car)
+library(DMwR)
+library(corrplot)
+#library(MVN)
+library(plyr)
+library(e1071)
+library(mlogit)
+library(ggcorrplot)
+library(RColorBrewer)
+library(VIM)
+library(class)
+library(descr)
+library(ipred)
+library(rpart)
+library(gbm)
+library(xgboost)
+library(caret)
+library(ipred)
+library(plyr)
+library(rpart)
+library(knitr)
+library(usdm)
+#clear the environment
+rm(list = ls())
+
+#read the dataset
+cars = read.csv("Cars.csv")
+
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+#basic statistics of the dataset
+summary(cars)
+str(cars)
+describe(cars)
+cars$Gender = as.numeric(cars$Gender)
+#checking for the null values
+plot_missing(cars)
+
+#from the summary we find that there is only 1 NA in MBA so we can remove that
+#cars = drop_na(cars)
+plot_missing(cars)
+
+#creating sample visuals for the dataset
+hist(cars$Salary,main = "Salary distribution" , xlab = "Salary" , ylab = "Distribution" , col = "deeppink")
+
+hist(cars$Work.Exp,main = "Work Experience Distribution" , xlab = "Work Experience" , ylab = "distribution" , col = "blue")
+
+hist(cars$Distance , main = "Distance Travelled" , xlab = "Distance" , ylab = "Distribution" , col = "red")
+
+boxplot(cars , col = c("red","pink","blue"),main = "Outlier detection")
+
+work_salary_dist = ggplot(cars, aes(x = cars$Salary, y = cars$Work.Exp)) +
+ facet_grid(~ cars$Gender + cars$Transport)+
+ geom_boxplot(na.rm = TRUE, colour = "#3366FF",outlier.colour = "red", 
+              outlier.shape = 1) +
+ labs(x = "Work Experience", y = "Salary") +
+ scale_x_continuous() +
+ scale_y_continuous() +
+ theme(legend.position="bottom", legend.direction="horizontal")
+
+work_salary_dist
+
+boxplot(cars$Age ~cars$Engineer, main = "Age vs Engineer" , xlab = "Age" , ylab = "Engineer",col = "red")
+
+boxplot(cars$Age ~cars$MBA, main ="Age Vs MBA" ,xlab = "Age" , ylab = "MBA",col = "blue")
+
+boxplot(cars$Salary ~cars$Engineer, main = "Salary vs Engineer",xlab = "Salary" , ylab = "Engineer",col = "pink")
+
+boxplot(cars$Work.Exp ~ cars$Gender , main = "Work Experience vs Gender",xlab = "Work Experience" , ylab = "Gender",col = "orange")
+
+plot(cars$Age~cars$Transport, main="Age vs Transport" , xlab = "Transport Types" , ylab = "Age" , col = c("pink","yellow","green"))
+
+boxplot(cars$Distance~cars$Transport, main="Distance vs Transport",xlab = "Transport Types" , ylab = "Distance" , col = c("red","yellow","blue"))
+
+pairs(cars)
+
+#To check the collinearity of the dataset provided
+vifcor(cars[-9])
+
+#Remove outliers
+quantile(cars$Age, c(0.95))
+cars$Age[which(cars$Age>37)] = 37
+quantile(cars$Salary,c(0.95))
+cars$Salary[which(cars$Salary>42)]  = 42
+quantile(cars$Distance,c(0.95))
+cars$Distance[which(cars$Distance> 18)] = 18
+
+```
+
+## Data Preparation
+
+You can also embed plots, for example:
+
+```{r pressure, echo=TRUE}
+cars[!complete.cases(cars), ]
+cars_impute <-kNN(data=cars,variable =c("MBA"),k=7)
+
+summary(cars_impute)
+
+cars_final = subset(cars_impute,select = Age:Transport)
+summary(cars_final)
+
+table(cars_final$Transport)
+
+cars_final$CarUsage<-ifelse(cars_final$Transport =='Car',1,0)
+table(cars_final$CarUsage)
+cars_final$CarUsage<-as.factor(cars_final$CarUsage)
+
+set.seed(400)
+carindex<-createDataPartition(cars_final$CarUsage, p=0.7,list = FALSE,times = 1
+)
+train<-cars_final[carindex,]
+test<-cars_final[-carindex,]
+prop.table(table(train$CarUsage))
+
+train<-train[,c(1:8,10)]
+test<-test[,c(1:8,10)]
+
+#Applying SMOTE on the train dataset
+attach(train)
+carsdataSMOTE<-SMOTE(CarUsage~., train, perc.over = 250,perc.under = 150)
+prop.table(table(carsdataSMOTE$CarUsage))
+```
+
+#Logistic regression model
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+```{r}
+pred_var<-'CarUsage'
+predictors<-c("Age","Work.Exp","Salary","Distance","license","Engineer","MBA","Gender")
+train.ctrl<-trainControl(method = 'repeatedcv',number = 10,repeats = 3)
+logreg<-train(carsdataSMOTE[,predictors],carsdataSMOTE[,pred_var],method = "glm",
+              family="binomial",trControl = train.ctrl)
+
+summary(logreg$finalModel)
+
+par(mfrow = c(2,2))
+plot(logreg$finalModel)
+
+logreg.coeff<-exp(coef(logreg$finalModel))
+varImp(object = logreg)
+
+plot(varImp(object = logreg), main="Vairable Importance")
+
+logreg.prediction<-predict.train(object = logreg,test[,predictors],type = "raw")
+
+logistic_regression_confusion = confusionMatrix(logreg.prediction,test[,pred_var], positive='1')
+logistic_regression_confusion
+```
+
+#Naive Bayes
+```{r}
+x = carsdataSMOTE[,-9]
+y = carsdataSMOTE$CarUsage
+modelNB = train(x,y,'nb',trControl=trainControl(method='cv',number=10))
+
+modelNB
+plot(modelNB)
+
+predict_NB = predict(modelNB,test)
+
+table(predict_NB,test$CarUsage)
+
+NaiveBayes_confusion = confusionMatrix(predict_NB,test$CarUsage)
+NaiveBayes_confusion
+
+```
+
+#knn method
+```{r}
+trControl <- trainControl(method  = "cv", number  = 10)
+KNN_Model <- caret::train(CarUsage ~ .,
+                       method     = "knn",
+                       tuneGrid   = expand.grid(k = 2:20),
+                       trControl  = trControl,
+                       metric     = "Accuracy",
+                       preProcess = c("center","scale"),
+                       data       = train)
+
+KNN_Model
+plot(KNN_Model)
+knn_predictions <- predict(KNN_Model,test)
+knn_confusion = confusionMatrix(knn_predictions, test$CarUsage)
+knn_confusion
+```
+
+#Bagging
+```{r}
+
+cars_final1=cars_final[,-9]
+cars_final1$Gender=as.factor(cars_final1$Gender)
+cars_final1$Engineer=as.numeric(cars_final1$Engineer)
+cars_final1$MBA=as.numeric(cars_final1$MBA)
+cars_final1$Age=as.numeric(cars_final1$Age)
+cars_final1$Work.Exp=as.numeric(cars_final1$Work.Exp)
+cars_final1$license=as.numeric(cars_final1$license)
+cars_final1$CarUsage=as.factor(cars_final1$CarUsage)
+#bag.train$CarUsage=as.factor(bag.train$CarUsage)
+index<-sample(nrow(cars_final1),round(0.7*nrow(cars_final1)))
+bag.train<-cars_final1[index,]
+bag.test<-cars_final1[-index,]
+
+mod.bagging = bagging(CarUsage ~.,
+                       data=bag.train,
+                       control=rpart.control(maxdepth=5, minsplit=4))
+
+summary(mod.bagging)
+
+bag.pred = predict(mod.bagging, bag.test)
+
+confusionMatrix_bagging = confusionMatrix(bag.pred,bag.test$CarUsage)
+confusionMatrix_bagging
+```
+
+#Boosting
+```{r}
+train$CarUsage = as.character(train$CarUsage)
+mod.boost = gbm(CarUsage ~ .,data=train, distribution=
+                      "bernoulli",n.trees =5000 , interaction.depth =4, shrinkage=0.01)
+summary(mod.boost)
+plot(mod.boost)
+
+boost.pred <- predict(mod.boost, test,n.trees =5000, type="response")
+
+y_pred_num <- ifelse(boost.pred > 0.5, 1, 0)
+y_pred <- factor(y_pred_num, levels=c(0, 1))
+table(y_pred,test$CarUsage)
+
+boosting_confusion = confusionMatrix(y_pred,test$CarUsage)
+print(boosting_confusion)
+```
+#Model performance
+```{r}
+ModelType = c("Logistic Regression", "K Nearest Neighbour", "Niave Bayes","Bagging","Boosting") 
+
+# Training classification accuracy
+Accuracy = c(0.9274,0.9758,0.9516,0.952,0.9839)
+
+# Training misclassification error
+Missclass_Error = 1 - Accuracy
+
+# validation classification accuracy
+specificity_values = c(logistic_regression_confusion$byClass[2], knn_confusion$byClass[2], 
+    NaiveBayes_confusion$byClass[2],confusionMatrix_bagging$byClass[2],boosting_confusion$byClass[2])
+
+sensitivity_values = c(logistic_regression_confusion$byClass[3], knn_confusion$byClass[3], 
+    NaiveBayes_confusion$byClass[3],confusionMatrix_bagging$byClass[3],boosting_confusion$byClass[3])
+
+kappa_values = c(logistic_regression_confusion$overall[2], knn_confusion$overall[2], 
+    NaiveBayes_confusion$overall[2],confusionMatrix_bagging$overall[2],boosting_confusion$overall[2])
+
+metrics <- data.frame(ModelType, Accuracy, Missclass_Error, specificity_values, 
+    sensitivity_values,kappa_values)  # data frame with above metrics
+
+knitr::kable(metrics, digits = 4)  # print table using kable() from knitr package
+```
+
