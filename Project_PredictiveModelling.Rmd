@@ -1,0 +1,495 @@
+---
+title: "Project_PredictiveModelling"
+author: "Baijayanti Chakraborty"
+date: "04/10/2019"
+output:
+  pdf_document: default
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+
+#clean the global environment
+rm(list = ls())
+#set the working directory
+setwd("~/Desktop/PGP-BABI/Predictive Modelling/week3-frequency based")
+
+#load the libraries
+library(readxl)
+library(DataExplorer)
+library(caret)
+library(psych)
+library(GGally)
+library(corrplot)
+library(earth)
+library(varImp)
+library(IMTest)
+library(pscl)
+library(e1071)
+library(pROC)
+library(class)
+library(gmodels)
+library(car)
+library(ROCR)
+library(blorr)
+library(devtools)
+library(ggplot2)
+library(Hmisc)
+library(klaR)
+library(MASS)
+library(plyr)
+library(scatterplot3d)
+library(SDMTools)
+library(dplyr)
+library(ElemStatLearn)
+library(caTools)
+library(boot)
+library(RColorBrewer)
+```
+
+##Exploratory Data Analysis
+```{r cars}
+#read the dataset
+cell = read_excel("Cellphone.xlsx",sheet = 2)
+#view the data set
+head(cell,7)
+
+#changing the column names to increase the readability
+colnames(cell)
+names(cell)[2] = "AccWeeks"
+names(cell)[3] = "ContRenew"
+names(cell)[4] = "Plan"
+names(cell)[5] = "Usage"
+names(cell)[6] = "CScalls"
+names(cell)[7] = "Min/Day"
+names(cell)[8] = "Call/Day"
+names(cell)[9] = "Charge/Month"
+names(cell)[10] = "Over.Fee"
+names(cell)[11] = "RoamingMins"
+#Basic data summary, Univariate, Bivariate analysis, graphs
+summary(cell)
+str(cell)
+sum(is.na(cell)) #No null values in the whole dataset
+
+#graph for null value cross check
+plot_missing(cell)
+
+#descriptive analytics
+describe(cell)
+
+#The dataset is not univariate but it is multivariate because Churn (target variable) is dependent on more than 1 factor.
+
+#Data Visualization
+#Check the outliers
+boxplot(cell,main = "Visualization to detect the outliers present in the dataset",xlab = "Column names",col = c("red","pink","blue","green"))
+
+#Some basic visualizations
+plot(cell$Usage,cell$Plan,main = "Plan and Usage plotting" , xlab = "Usage" , ylab = "Plan" , col = "red")
+plot(cell$`Charge/Month`,cell$Usage , main = "Monthly Charge and Usage plan" , xlab = "Monthly Charge",ylab = "Data Usage",col = "blue")
+plot(cell$`Charge/Month`,cell$Plan , main = "Monthly Charge and Data Plan" , xlab = "Monthly Charge",ylab = "Data Plan",col = "green")
+
+pairs(cell , main = "Relation amongst the data items")
+
+boxplot(Usage~Churn,
+data = cell,
+main = "Relation between data usage and churn",
+xlab = "Churn",
+ylab = "Data Usage",
+col = "orange",
+border = "brown",
+ylim = c(0, 7)
+)
+
+boxplot(`Min/Day`~Churn,
+ data = cell,
+ main = "Daily minutes provided as per churn",
+ xlab = "Churn",
+ ylab = "DayMins",
+ col = "Red",
+ border = "Blue",
+ ylim = c(0, 400)
+)
+
+boxplot(Over.Fee~Churn,
+ data = cell,
+ main = "Churn based on the overage fee",
+ xlab = "Churn",
+ ylab = "OverageFee",
+ col = "Green",
+ border = "red",
+ ylim = c(0, 25)
+)
+
+
+boxplot(RoamingMins~Churn,
+ data = cell,
+ main = "Churn Rate based on the roaming mins",
+ xlab = "Churn",
+ ylab = "RoamMins",
+ col = "Deeppink",
+ border = "blue",
+ ylim = c(0, 22)
+)
+
+pairs.panels(cell[,c(2:11)],gap = 0, bg = c("red", "green","blue" , main = "Data Variations")[cell
+$Churn], pch = 21)
+
+#Correlation Matrix 
+corrplot(corr = cor(cell), method = "number" , type = "upper")
+mat = cor(cell)
+print(mat)
+#options(repr.plot.width =6, repr.plot.height = 2)
+
+```
+
+## From the above EDA we come up with the following insghts :-
+##1.Churn is our target variable and we need to find the most optimized method of predicting the churn rate
+##2.We do have outliers in the dataset in columns like :
+##a)Churn,b)AccWeek, c)ContRenew , d)Usage ,e)CScalls,f)Min/Day g)Call/Day h)Charge/Month i)over.fee j)RoamingMins.
+##3.Multicolinearity does not exist in a huge amount amongst the variables.Most of them are either negatively correlated or has very minute correlation.
+
+
+#Logistic Regression
+```{r pressure, echo=FALSE}
+#We have selected churn as the target variable so detection of logistic regression be on that.
+cell$Churn = as.factor(cell$Churn)
+cell$ContRenew = as.factor(cell$ContRenew)
+cell$Plan = as.factor(cell$Plan)
+one<- cell[which(cell$Churn =="1"),]
+zero<- cell[which(cell$Churn =="0"),]
+training1 <- sample(1:nrow(one),0.7*nrow(one))
+training0 <- sample(1:nrow(zero),0.7*nrow(zero))
+Final_training1 <- one[training1,]
+Final_training0 <- zero[training0,]
+trainingData <- rbind(Final_training1, Final_training0)
+test1 <- one[-training1,]
+test0 <- zero[-training0,]
+testData <- rbind(test1, test0)
+prop.table(table(testData$Churn))
+
+Model1 <- glm(Churn ~ ., data = trainingData,family = binomial(link="logit"))
+summary(Model1)
+
+anova(Model1,test = "Chisq")
+pR2(Model1)
+
+#checking the multicollinearity
+car::vif(Model1)
+#the model is affected by :Usage , `Min/Day` , `Charge/Month` ,  Over.Fee 
+
+#making the models by removing the above the list variables
+mod1 = glm(Churn ~ . -Usage ,data = trainingData,family = binomial(link="logit"))
+summary(mod1)
+anova(mod1,test = "Chisq")
+
+mod2 = glm(Churn ~ . -`Min/Day` ,data = trainingData,family = binomial(link="logit"))
+summary(mod2)
+anova(mod2,test = "Chisq")
+
+mod3 = glm(Churn ~ . -`Charge/Month` ,data = trainingData,family = binomial(link="logit"))
+summary(mod3)
+anova(mod3,test = "Chisq") 
+
+mod4 = glm(Churn ~ . -Over.Fee ,data = trainingData,family = binomial(link="logit"))
+summary(mod4)
+anova(mod4,test = "Chisq") 
+
+#predicting the models on the training dataset 
+pred<-predict(Model1,newdata=trainingData,type="response") 
+prediction<- ifelse(pred>0.5,1,0)
+prediction1 <- factor(prediction, levels=c(0,1))
+act <- trainingData$Churn 
+confusionMatrix(prediction1,act,positive="1")
+
+pred1<-predict(mod1,newdata=trainingData,type="response") 
+prediction1<- ifelse(pred1>0.5,1,0)
+prediction2 <- factor(prediction1, levels=c(0,1))
+act <- trainingData$Churn 
+confusionMatrix(prediction2,act,positive="1")
+
+pred2<-predict(mod2,newdata=trainingData,type="response") 
+prediction3<- ifelse(pred2>0.5,1,0)
+prediction4 <- factor(prediction3, levels=c(0,1))
+act <- trainingData$Churn 
+confusionMatrix(prediction4,act,positive="1")
+
+pred3<-predict(mod3,newdata=trainingData,type="response") 
+prediction5<- ifelse(pred3>0.5,1,0)
+prediction6 <- factor(prediction5, levels=c(0,1))
+act <- trainingData$Churn 
+confusionMatrix(prediction6,act,positive="1")
+
+pred4<-predict(mod4,newdata=trainingData,type="response") 
+prediction7<- ifelse(pred4>0.5,1,0)
+prediction8 <- factor(prediction7, levels=c(0,1))
+act <- trainingData$Churn 
+confusionMatrix(prediction8,act,positive="1")
+
+#After training data is tested we can go forward and start with the test data
+pred_test<-predict(Model1,newdata=testData,type="response") 
+prediction_test<- ifelse(pred_test>0.5,1,0)
+prediction1_test <- factor(prediction_test, levels=c(0,1))
+act <- testData$Churn 
+confusionMatrix(prediction1_test,act,positive="1")
+
+pred1_test<-predict(mod1,newdata=testData,type="response") 
+prediction1_test<- ifelse(pred1_test>0.5,1,0)
+prediction2_test <- factor(prediction1_test, levels=c(0,1))
+act <- testData$Churn 
+confusionMatrix(prediction2_test,act,positive="1")
+
+pred2_test<-predict(mod2,newdata=testData,type="response") 
+prediction3_test<- ifelse(pred2_test>0.5,1,0)
+prediction4_test <- factor(prediction3_test, levels=c(0,1))
+act <- testData$Churn 
+confusionMatrix(prediction4_test,act,positive="1")
+
+pred3_test<-predict(mod3,newdata=testData,type="response") 
+prediction5_test<- ifelse(pred3_test>0.5,1,0)
+prediction6_test <- factor(prediction5_test, levels=c(0,1))
+act <- testData$Churn 
+confusionMatrix(prediction6_test,act,positive="1")
+
+pred4_test<-predict(mod4,newdata=testData,type="response") 
+prediction7_test<- ifelse(pred4_test>0.5,1,0)
+prediction8_test <- factor(prediction7_test, levels=c(0,1))
+act <- testData$Churn 
+confusionMatrix(prediction8_test,act,positive="1")
+
+#ROC plot and AUC of the different models we have created in Logistic Regression
+rocpred<-predict(Model1,testData,type = 'response') 
+rocpred<-prediction(pred_test, testData$Churn) 
+roc<-performance(rocpred,"tpr", "fpr")
+plot(roc)
+auc<-performance(rocpred,"auc") 
+auc
+
+rocpred_mod1<-predict(mod1,testData,type = 'response') 
+rocpred_mod1<-prediction(pred1_test, testData$Churn) 
+roc_mod1<-performance(rocpred_mod1,"tpr", "fpr")
+plot(roc_mod1)
+auc_mod1<-performance(rocpred_mod1,"auc") 
+auc_mod1
+
+rocpred_mod2<-predict(mod2,testData,type = 'response') 
+rocpred_mod2<-prediction(pred2_test, testData$Churn) 
+roc_mod2<-performance(rocpred_mod2,"tpr", "fpr")
+plot(roc_mod2)
+auc_mod2<-performance(rocpred_mod2,"auc") 
+auc_mod2
+
+rocpred_mod3<-predict(mod3,testData,type = 'response') 
+rocpred_mod3<-prediction(pred3_test, testData$Churn) 
+roc_mod3<-performance(rocpred_mod3,"tpr", "fpr")
+plot(roc_mod3)
+auc_mod3<-performance(rocpred_mod3,"auc") 
+auc_mod3
+
+rocpred_mod4<-predict(mod4,testData,type = 'response') 
+rocpred_mod4<-prediction(pred4_test, testData$Churn) 
+roc_mod4<-performance(rocpred_mod4,"tpr", "fpr")
+plot(roc_mod4)
+auc_mod4<-performance(rocpred_mod4,"auc") 
+auc_mod4
+
+#So we can see that almost all the graphs are nearly the same for these models. The model1 is having all the elements while the other 4 models doesnot have the elements which were having high collinearity.
+#The next model will not be having the highly collinear elements and we would examine the model.
+
+Model2 = glm(Churn ~ AccWeeks +  ContRenew + CScalls + `Call/Day` + RoamingMins ,data = trainingData , family = binomial(link = logit))
+summary(Model2)
+anova(Model2,test = "Chisq")
+#Checking the multi collinearity
+car::vif(Model2)
+
+#Prediction using the model for the training dataset
+pred_Model2<-predict(Model2,newdata=trainingData,type="response") 
+prediction_Model2<- ifelse(pred_Model2>0.5,1,0)
+prediction1_Model2 <- factor(prediction_Model2, levels=c(0,1))
+act <- trainingData$Churn 
+confusionMatrix(prediction1_Model2,act,positive="1")
+
+#Prediction using the test dataset
+pred_Model2_test<-predict(Model2,newdata=testData,type="response") 
+prediction_Model2_test<- ifelse(pred_Model2_test>0.5,1,0)
+prediction1_Model2_test <- factor(prediction_Model2_test, levels=c(0,1))
+act <- testData$Churn 
+confusionMatrix(prediction1_Model2_test,act,positive="1")
+
+#ROC Curve and AUC
+rocpred_Model2<-predict(Model2,testData,type = 'response') 
+rocpred_Model2<-prediction(pred_Model2_test, testData$Churn) 
+roc_Model2<-performance(rocpred_Model2,"tpr", "fpr")
+plot(roc_Model2)
+auc<-performance(rocpred_Model2,"auc") 
+auc
+
+k = blr_gains_table(Model2)
+plot(k)
+
+blr_ks_chart(k, title = "KS Chart",
+             yaxis_title = " ",xaxis_title = "Churn rate",
+             ks_line_color = "black")
+
+blr_decile_lift_chart(k, xaxis_title = "Decile",
+                      yaxis_title = "Decile Mean / Global Mean",
+                      title = "Decile Lift Chart",
+                      bar_color = "blue", text_size = 3.5,
+                      text_vjust = -0.3)
+
+blr_decile_capture_rate(k, xaxis_title = "Decile",
+                        yaxis_title = "Capture Rate",
+                        title = "Capture Rate by Decile",
+                        bar_color = "blue", text_size = 3.5,
+                        text_vjust =-0.3)
+
+blr_roc_curve(k, title = "ROC Curve",
+              xaxis_title = "1 - Specificity",
+              yaxis_title = "Sensitivity",roc_curve_col = "blue",
+              diag_line_col = "red", point_shape = 18,
+              point_fill = "blue", point_color = "blue",
+              plot_title_justify = 0.5)  
+
+blr_plot_difchisq_fitted(Model2, point_color = "blue",
+                         title = "Delta Chi Square vs Fitted Values Plot",
+                         xaxis_title = "Fitted Values",
+                         yaxis_title = "Delta Chi Square")
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+#KNN Model
+```{r}
+#str(cell)
+cell$ContRenew = as.numeric(cell$ContRenew)
+cell$Plan = as.numeric(cell$Plan)
+
+#Normalizing the data
+normailize<-function(x){ return((x-min(x))/(max(x)-min(x)))
+}
+
+cell.norm<-as.data.frame(lapply(cell[,-1],normailize ))
+#View(cell.norm)
+usable.data = cbind(cell[,1], cell.norm)
+str(usable.data)
+#View(usable.data)
+# Data partitioning
+spl = sample.split(usable.data$Churn, SplitRatio = 0.7)
+train = subset(usable.data, spl == T)
+test = subset(usable.data, spl == F)
+dim(train)
+dim(test)
+
+pred_knn_5 = knn(train[-1], test[-1], train[,1], k = 3) 
+table.knn_5 = table(test[,1], pred_knn_5)
+accuracy_knn_5 = sum(diag(table.knn_5)/sum(table.knn_5))
+accuracy_knn_5
+loss.knn.5<-table.knn_5[2,1]/(table.knn_5[2,1]+table.knn_5[1,1])
+loss.knn.5
+
+```
+
+#Naive Bayes Model
+```{r}
+set.seed(1234)
+trainIndex = createDataPartition(cell$Churn, p=0.7, list = FALSE, times = 1)
+train.data = cell[trainIndex, ]
+test.data  = cell[-trainIndex,]
+
+dim(train.data)
+dim(test.data)
+
+prop.table(table(cell$Churn))
+prop.table(table(train.data$Churn))
+prop.table(table(test.data$Churn))
+
+# Normalize variables
+scale = preProcess(train.data, method = "range")
+
+train.norm.data = predict(scale, train.data)
+test.norm.data = predict(scale, test.data)
+
+NB = naiveBayes(x=train.norm.data[-c(1,5,9)], y=train.norm.data$Churn)
+
+# Performance metrics (out-of-the-sample)
+pred = predict(NB, newdata = train.norm.data[-1])
+confusionMatrix(pred, train.norm.data$Churn,positive="1")
+
+# Performance metrics (in-sample)
+pred = predict(NB, newdata = test.norm.data[-1])
+confusionMatrix(pred,test.norm.data$Churn,positive="1")
+```
+
+#Model Performance
+```{r}
+
+splitSample <- sample(1:2, size = nrow(cell), prob = c(0.7, 0.3), replace = T)
+
+train_set <- cell[splitSample == 1, ] 
+
+intrain <- sample(1:2, size = nrow(train_set), prob = c(0.7, 0.3), replace = T)
+
+trainset <- train_set[intrain == 1, ] 
+
+validset <- train_set[intrain == 2, ] 
+
+testset <- cell[splitSample == 2, ] 
+
+#cross validation of the data 
+tcontrol <- trainControl(method = "cv", number = 10)
+set.seed(1234)
+
+# KNN
+modelKNN <- train(Churn ~ ., data = trainset, method = "knn", preProcess = c("center", 
+    "scale"), trControl = tcontrol)  # data is normalised using Preprocess
+plot(modelKNN)
+# Naive Bayes
+modelNB <- train(Churn ~ ., data = trainset, method = "nb",trControl = tcontrol)
+plot(modelNB)
+# Logisitic Regression
+modelLG <- train(Churn ~ ., data = trainset, method = "glm", family = binomial, 
+    trControl = tcontrol)
+plot(modelLG$finalModel)
+
+# KNN
+pKNN = predict(modelKNN, validset)
+
+# Naive Bayes
+pNB = predict(modelNB, validset)
+
+# Logistic Regression
+pLG = predict(modelLG, validset)
+
+# KNN
+cmKNN = confusionMatrix(validset$Churn, pKNN)
+
+
+# Naive Bayes
+cmNB = confusionMatrix(validset$Churn, pNB)
+
+# Logisitic Regression
+cmLG <- confusionMatrix(validset$Churn, pLG)
+
+
+ModelType <- c("K nearest neighbor", "Naive Bayes", "Logistic regression") 
+
+# Training classification accuracy
+Accuracy <- c(max(modelKNN$results$Accuracy), max(modelNB$results$Accuracy),  max(modelLG$results$Accuracy))
+
+# Training misclassification error
+Missclass_Error <- 1 - Accuracy
+
+# validation classification accuracy
+ValidationAccuracy <- c(cmKNN$overall[1], cmNB$overall[1], 
+    cmLG$overall[1])
+
+# Validation misclassification error or out-of-sample-error
+Validation_missclass_Error <- 1 - ValidationAccuracy
+
+metrics <- data.frame(ModelType, Accuracy, Missclass_Error, ValidationAccuracy, 
+    Validation_missclass_Error)  # data frame with above metrics
+
+knitr::kable(metrics, digits = 5)  # print table using kable() from knitr package
+
+```
+
