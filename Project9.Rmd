@@ -1,0 +1,499 @@
+---
+title: "Project_FRA"
+author: "Baijayanti"
+date: "17/03/2020"
+output: word_document
+---
+
+```{r setup, include=TRUE}
+
+setwd("~/Desktop/PGP-BABI/Financial Risk analysis")
+#Installing Library
+library(SnowballC)
+library(tm)
+library(ggplot2)
+library(RColorBrewer)
+library(wordcloud)
+library(topicmodels)
+library(data.table)
+library(stringi)
+library(syuzhet)
+#library(qdap)
+library(dplyr)
+library(plyr)
+library(grid)
+library(gridExtra)
+library(NbClust)
+library(cluster)
+library(fpc)
+library(Rtsne)
+library(caTools)
+library(rattle)
+library(ROCR)
+library(psych)
+library(DataExplorer)
+library(rpart.plot)
+library(randomForest)
+library(tidyverse)
+library(caret)
+library(corpus)
+library(InformationValue)
+library(GGally)
+library(mice)
+#library(xlsx)
+library(Amelia)
+library(car)
+library(DMwR)
+library(Hmisc)
+library(broom)
+```
+
+## Basic Data Analysis
+
+```{r}
+#Read the data
+data = read_excel("raw-data.xlsx",sheet = 1)
+
+colnames(data)
+
+head(data)
+
+tail(data)
+
+#Basic statistic analysis
+summary(data)
+str(data)
+
+DataExplorer::plot_missing(data)
+#From the above graph we can infer that the deposit row can be removed as it has no data at all
+data[,c("Deposits..accepted.by.commercial.banks.")] <- list(NULL)
+sum(is.na(data))
+
+Def=ifelse(data$`Networth Next Year`>0,0,1)
+summary(as.factor(Def))
+
+MissingValues = lapply(data,function(x) sum(is.na(x))) 
+MissingValues
+
+missmap(data, main = "Missing Values vs Observed Data")
+
+```
+
+## Data Cleaning
+
+```{r}
+attach(data)
+data[,c("PE.on.BSE")] <- list(NULL)
+data[,c("Investments")] <- list(NULL)
+data[,c("Other.income")] <- list(NULL)
+data[,c("Deferred.tax.liability")] <- list(NULL)
+data[,c("Income.from.fincial.services")] <- list(NULL)
+
+
+data.knn<- knnImputation(data[, !names(data) %in% "medv"])
+sum(is.na(data.knn))
+
+```
+
+```{r}
+#Introduction of new variables
+
+#Profitability ratio
+data.knn$Profit = data.knn$Profit.after.tax/data.knn$Sales
+data.knn$Profit.assets.ratio = data.knn$PBT/data.knn$Total.liabilities
+
+#Leverage ratio
+data.knn$TotalEquity = data.knn$Total.liabilities/data.knn$Debt.to.equity.ratio..times.
+data.knn$EquityMultipier = data.knn$Total.assets/data.knn$TotalEquity
+data.knn$Borrowing.ratio = data.knn$Borrowings/data.knn$Total.liabilities
+
+#Liquidity ratio
+data.knn$LiquidityRatio = data.knn$Net.working.capital/data.knn$Total.assets
+data.knn$Turnover.ratio = data.knn$Sales/data.knn$Total.liabilities
+
+#Company size
+data.knn$CompanySize = data.knn$Net.worth/data.knn$Total.assets
+View(data.knn)
+
+data.knn$Default=ifelse(data.knn$Networth.Next.Year>0,0,1)
+
+
+# Checking the correlation and MultiCollinearity
+datacor=cor(data.knn[,-c(1)])
+View(datacor)
+
+corrplot::corrplot(datacor,
+                   method="color",type="upper",
+                   addCoef.col="black",
+                   tl.col="black",
+                   tl.cex=0.9,
+                   diag=FALSE,
+                   number.cex=0.7
+)
+
+data.knn[,c("TotalEquity")] <- list(NULL)
+data.knn[,c("EquityMultipier")] <- list(NULL)
+data.knn[,c("Total.assets")] <- list(NULL)
+data.knn[,c("Networth.Next.Year")] <- list(NULL)
+data.knn[,c("Num")] <- list(NULL)
+
+data.knn$Def = as.factor(data.knn$Def)
+
+```
+
+
+#Model Creation
+```{r}
+Model1=glm(data.knn$Default~.,
+           data=data.knn,family = binomial,control = list(maxit = 1000))
+ 
+## Warning: glm.fit: fitted probabilities numerically 0 or 1 occurred
+vif(Model1)
+
+#Identifying the important variables by blorr method
+library(blorr)
+blr_step_aic_both(Model1, details = FALSE)
+
+#Identifying the important variables by RF method
+data.knn.rf=data.knn
+#Getting the Important Variables from Random Forest after a variable Plot
+data_rf_model <- randomForest(Default~., data.knn.rf,
+                              ntree = 501,
+                              mtry = 5,
+                              nodesize = 10,
+                              importance = TRUE) 
+
+plot(data.knn.rf, main="")
+
+summary(data.knn.rf)
+
+importance(data_rf_model)
+
+```
+
+#OUTLIER TREATMENT
+```{r}
+#OUTLIER TREATMENT
+library(outliers)
+outlier_capping <- function(x)
+{
+  qnt <- quantile(x, probs=c(.25, .75), na.rm = T)
+  caps <- quantile(x, probs=c(.05, .95), na.rm = T)
+  H <- 1.5 * IQR(x, na.rm = T)
+  x[x < (qnt[1] - H)] <- caps[1]
+  x[x > (qnt[2] + H)] <- caps[2]
+  return(x)
+}
+data.knn.outliers = data.knn
+
+data.knn.outliers$Net.worth=outlier_capping(data.knn.outliers$Net.worth)
+
+data.knn.outliers$Total.income=outlier_capping(data.knn.outliers$Total.income)
+
+data.knn.outliers$Change.in.stock=outlier_capping(data.knn.outliers$Change.in.stOck)
+
+data.knn.outliers$Total.expenses=outlier_capping(data.knn.outliers$Total.expenses)
+
+data.knn.outliers$Profit.after.tax=outlier_capping(data.knn.outliers$Profit.after.tax)
+
+data.knn.outliers$PBDITA=outlier_capping(data.knn.outliers$PBDITA)
+
+data.knn.outliers$PBT=outlier_capping(data.knn.outliers$PBT)
+
+data.knn.outliers$Cash.profit=outlier_capping(data.knn.outliers$Cash.profit)
+
+data.knn.outliers$PBDITA.as...of.total.income=outlier_capping(data.knn.outliers$PBDITA.as...of.total.income)
+
+data.knn.outliers$PBT.as...of.total.income=outlier_capping(data.knn.outliers$PBT.as...of.total.income)
+
+data.knn.outliers$PAT.as...of.total.income=outlier_capping(data.knn.outliers$PAT.as...of.total.income)
+
+data.knn.outliers$Cash.profit.as...of.total.income=outlier_capping(data.knn.outliers$Cash.profit.as...of.total.income)
+
+data.knn.outliers$PAT.as...of.net.worth=outlier_capping(data.knn.outliers$PAT.as...of.net.worth)
+
+data.knn.outliers$Sales=outlier_capping(data.knn.outliers$Sales)
+
+data.knn.outliers$Total.capital=outlier_capping(data.knn.outliers$Total.capital)
+
+data.knn.outliers$Reserves.and.funds=outlier_capping(data.knn.outliers$Reserves.and.funds)
+
+data.knn.outliers$Borrowings=outlier_capping(data.knn.outliers$Borrowings)
+
+data.knn.outliers$Current.liabilities...provisions=outlier_capping(data.knn.outliers$Current.liabilities...provisions)
+
+data.knn.outliers$Shareholders.funds=outlier_capping(data.knn.outliers$Shareholders.funds)
+
+data.knn.outliers$Cumulative.retained.profits=outlier_capping(data.knn.outliers$Cumulative.retained.profits)
+
+data.knn.outliers$Capital.employed=outlier_capping(data.knn.outliers$Capital.employed)
+
+data.knn.outliers$TOL.TNW=outlier_capping(data.knn.outliers$TOL.TNW)
+
+data.knn.outliers$Total.term.liabilities...tangible.net.worth=outlier_capping(data.knn.outliers$Total.term.liabilities...tangible.net.worth)
+
+data.knn.outliers$Contingent.liabilities...Net.worth....=outlier_capping(data.knn.outliers$Contingent.liabilities...Net.worth....)
+
+data.knn.outliers$Contingent.liabilities=outlier_capping(data.knn.outliers$Contingent.liabilities)
+
+data.knn.outliers$Net.fixed.assets=outlier_capping(data.knn.outliers$Net.fixed.assets)
+
+data.knn.outliers$Current.assets=outlier_capping(data.knn.outliers$Current.assets)
+
+data.knn.outliers$Net.working.capital=outlier_capping(data.knn.outliers$Net.working.capital)
+
+data.knn.outliers$Quick.ratio..times.=outlier_capping(data.knn.outliers$Quick.ratio..times.)
+
+data.knn.outliers$Current.ratio..times.=outlier_capping(data.knn.outliers$Current.ratio..times.)
+
+data.knn.outliers$Debt.to.equity.ratio..times.=outlier_capping(data.knn.outliers$Debt.to.equity.ratio..times.)
+
+data.knn.outliers$Cash.to.current.liabilities..times.=outlier_capping(data.knn.outliers$Cash.to.current.liabilities..times.)
+
+data.knn.outliers$Cash.to.average.cost.of.sales.per.day=outlier_capping(data.knn.outliers$Cash.to.average.cost.of.sales.per.day)
+
+data.knn.outliers$Creditors.turnover=outlier_capping(data.knn.outliers$Creditors.turnover)
+
+data.knn.outliers$Debtors.turnover=outlier_capping(data.knn.outliers$Debtors.turnover)
+
+data.knn.outliers$Finished.goods.turnover=outlier_capping(data.knn.outliers$Finished.goods.turnover)
+
+data.knn.outliers$WIP.turnover=outlier_capping(data.knn.outliers$WIP.turnover)
+
+data.knn.outliers$Raw.material.turnover=outlier_capping(data.knn.outliers$Raw.material.turnover)
+
+data.knn.outliers$Shares.outstanding=outlier_capping(data.knn.outliers$Shares.outstanding)
+
+data.knn.outliers$Equity.face.value=outlier_capping(data.knn.outliers$Equity.face.value)
+
+data.knn.outliers$EPS=outlier_capping(data.knn.outliers$EPS)
+
+data.knn.outliers$Adjusted.EPS=outlier_capping(data.knn.outliers$Adjusted.EPS)
+
+data.knn.outliers$Total.liabilities=outlier_capping(data.knn.outliers$Total.liabilities)
+
+data.knn.outliers$Profitablity=outlier_capping(data.knn.outliers$Profitablity)
+
+data.knn.outliers$LiquidityRatio=outlier_capping(data.knn.outliers$LiquidityRatio)
+
+data.knn.outliers$CompanySize=outlier_capping(data.knn.outliers$CompanySize)
+
+data.knn.outliers$Profitability.assets.ratio=outlier_capping(data.knn.outliers$Profitability.assets.ratio)
+
+data.knn.outliers$Borrowing.ratio=outlier_capping(data.knn.outliers$Borrowing.ratio)
+
+data.knn.outliers$Turnover.ratio=outlier_capping(data.knn.outliers$Turnover.ratio)
+
+varImpPlot(data_rf_model)
+
+```
+
+
+#Removing the unwanted variables
+```{r}
+#REMOVING THE UNWANTED VARIABLES
+Data.knn.train1.EDA = data.knn.outliers
+names(Data.knn.train1.EDA)
+Data.knn.train1.EDA[,c("Net.worth")] <- list(NULL)
+Data.knn.train1.EDA[,c("Total.income")] <- list(NULL)
+Data.knn.train1.EDA[,c("Change.in.stock")] <- list(NULL)
+Data.knn.train1.EDA[,c("Total.expenses")] <- list(NULL)
+Data.knn.train1.EDA[,c("Profit.after.tax")] <- list(NULL)
+Data.knn.train1.EDA[,c("PBDITA")] <- list(NULL)
+Data.knn.train1.EDA[,c("PBT")] <- list(NULL)
+Data.knn.train1.EDA[,c("PBDITA.as...of.total.income")] <- list(NULL)
+Data.knn.train1.EDA[,c("PBT.as...of.total.income")] <- list(NULL)
+Data.knn.train1.EDA[,c("PAT.as...of.total.income")] <- list(NULL)
+Data.knn.train1.EDA[,c("Sales")] <- list(NULL)
+Data.knn.train1.EDA[,c("Total.capital")] <- list(NULL)
+Data.knn.train1.EDA[,c("Reserves.and.funds")] <- list(NULL)
+Data.knn.train1.EDA[,c("Borrowings")] <- list(NULL)
+Data.knn.train1.EDA[,c("Current.liabilities...provisions")] <- list(NULL)
+Data.knn.train1.EDA[,c("Shareholders.funds")] <- list(NULL)
+Data.knn.train1.EDA[,c("Cumulative.retained.profits")] <- list(NULL)
+Data.knn.train1.EDA[,c("Capital.employed")] <- list(NULL)
+Data.knn.train1.EDA[,c("Total.term.liabilities...tangible.net.worth")] <- list(NULL)
+Data.knn.train1.EDA[,c("Contingent.liabilities...Net.worth....")] <- list(NULL)
+Data.knn.train1.EDA[,c("Contingent.liabilities")] <- list(NULL)
+Data.knn.train1.EDA[,c("Net.fixed.assets")] <- list(NULL)
+Data.knn.train1.EDA[,c("Current.assets")] <- list(NULL)
+
+Data.knn.train1.EDA[,c("Net.working.capital")] <- list(NULL)
+Data.knn.train1.EDA[,c("Quick.ratio..times.")] <- list(NULL)
+Data.knn.train1.EDA[,c("Creditors.turnover")] <- list(NULL)
+Data.knn.train1.EDA[,c("Finished.goods.turnover")] <- list(NULL)
+Data.knn.train1.EDA[,c("Shares.outstanding")] <- list(NULL)
+Data.knn.train1.EDA[,c("Equity.face.value")] <- list(NULL)
+Data.knn.train1.EDA[,c("Adjusted.EPS")] <- list(NULL)
+Data.knn.train1.EDA[,c("Total.liabilities")] <- list(NULL)
+Data.knn.train1.EDA[,c("LiquidityRatio")] <- list(NULL)
+Data.knn.train1.EDA[,c("Borrowing.ratio")] <- list(NULL)
+summary(Data.knn.train1.EDA)
+```
+
+#Data Visualisation
+```{r}
+boxplot(Data.knn.train1.EDA$Cash.profit,horizontal = TRUE,
+        col="red",main="Box plot of Cash.profit")
+hist(Data.knn.train1.EDA$Cash.profit,col="blue",
+     main="Histogram of Cash.profit",xlab="Cash.profit")
+
+boxplot(Data.knn.train1.EDA$PAT.as...of.net.worth,horizontal = TRUE,
+        col="red",main="Box plot of PAT.as...of.net.worth")
+hist(Data.knn.train1.EDA$PAT.as...of.net.worth,col="blue",
+     main="Histogram of PAT.as...of.net.worth",xlab="PAT.as...of.net.worth")
+
+boxplot(Data.knn.train1.EDA$TOL.TNW,horizontal = TRUE,
+        col="red",main="Box plot of TOL.TNW")
+hist(Data.knn.train1.EDA$TOL.TNW,col="blue",
+     main="Histogram of TOL.TNW",xlab="TOL.TNW")
+
+boxplot(Data.knn.train1.EDA$Cash.profit.as...of.total.income,horizontal = TRUE,
+        col="red",main="Box plot of Cash.profit.as...of.total.income")
+hist(Data.knn.train1.EDA$Cash.profit.as...of.total.income,col="blue",
+     main="Histogram of Cash.profit.as...of.total.income",xlab="Cash.profit.as...of.total.income")
+
+boxplot(Data.knn.train1.EDA$CompanySize,horizontal = TRUE,
+        col="red",main="Box plot of CompanySize")
+hist(Data.knn.train1.EDA$CompanySize,col="blue",
+     main="Histogram of CompanySize",xlab="CompanySize")
+
+boxplot(Data.knn.train1.EDA$Turnover.ratio,horizontal = TRUE,
+        col="red",main="Box plot of Turnover.ratio")
+hist(Data.knn.train1.EDA$Turnover.ratio,col="blue",
+     main="Histogram of Turnover.ratio",xlab="Turnover.ratio")
+
+boxplot(Data.knn.train1.EDA$Cash.to.average.cost.of.sales.per.day,horizontal = TRUE,
+        col="red",main="Box plot of Cash.to.average.cost.of.sales.per.day")
+hist(Data.knn.train1.EDA$Cash.to.average.cost.of.sales.per.day,col="blue",
+     main="Histogram of Cash.to.average.cost.of.sales.per.day",xlab="Cash.to.average.cost.of.sales.per.day")
+
+boxplot(Data.knn.train1.EDA$Profitability.assets.ratio,horizontal = TRUE,
+        col="red",main="Box plot of Profitability.assets.ratio")
+hist(Data.knn.train1.EDA$Profitability.assets.ratio,col="blue",
+     main="Histogram of Profitability.assets.ratio",xlab="Profitability.assets.ratio")
+
+boxplot(Data.knn.train1.EDA$Debt.to.equity.ratio..times.,horizontal = TRUE,
+        col="red",main="Box plot of Debt.to.equity.ratio..times.")
+hist(Data.knn.train1.EDA$Debt.to.equity.ratio..times.,col="blue",
+     main="Histogram of Debt.to.equity.ratio..times.",xlab="Debt.to.equity.ratio..times.")
+
+boxplot(Data.knn.train1.EDA$EPS,horizontal = TRUE,
+        col="red",main="Box plot of EPS")
+hist(Data.knn.train1.EDA$EPS,col="blue",
+     main="Histogram of EPS",xlab="EPS")
+
+boxplot(Data.knn.train1.EDA$Cash.to.current.liabilities..times.,horizontal = TRUE,
+        col="red",main="Box plot of Cash.to.current.liabilities..times.")
+hist(Data.knn.train1.EDA$Cash.to.current.liabilities..times.,col="blue",
+     main="Histogram of Cash.to.current.liabilities..times.",xlab="Cash.to.current.liabilities..times.")
+
+summary(Data.knn.train1.EDA$Cash.profit)
+##    Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+##  -121.7     3.1    18.3   142.7    87.4   804.8
+nd2.melt <- melt(Data.knn.train1.EDA, id = c("Default"))
+
+nd2.melt
+# box plots
+zz <- ggplot(nd2.melt, aes(x=Default, y=value))
+zz+geom_boxplot(aes(color = Default), alpha=0.7 ) +
+  facet_wrap(~variable,scales = "free_x", nrow = 3)+
+  coord_flip()
+
+```
+
+#LOGISTIC REGRESSION
+```{r}
+LogisticRegression = glm(Default~ Net.worth+Cash.profit+PBDITA.as...of.total.income+
+                     PBT.as...of.total.income+PAT.as...of.total.income+
+                     Cash.profit.as...of.total.income+PAT.as...of.net.worth+
+                     Sales+TOL.TNW+Total.term.liabilities...tangible.net.worth+
+                     Contingent.liabilities...Net.worth....+Quick.ratio..times.+
+                     Current.ratio..times.+Debt.to.equity.ratio..times.+
+                     Cash.to.current.liabilities..times.+
+                     Cash.to.average.cost.of.sales.per.day+Creditors.turnover+
+                     Debtors.turnover+Finished.goods.turnover+WIP.turnover+
+                     Raw.material.turnover+EPS+Total.liabilities+Profitablity+
+                     LiquidityRatio+CompanySize+Profitability.assets.ratio+
+                     Borrowing.ratio+Turnover.ratio,
+                   data=data.knn.outliers,family = binomial,control = list(maxit = 1000))
+
+summary(LogisticRegression)
+vif(LogisticRegression)
+
+plot(as.factor(LogisticRegression$y),LogisticRegression$fitted.values)
+LogisticRegression.Pred = ifelse(LogisticRegression$fitted.values>0.05,1,0)
+table(LogisticRegression$y,LogisticRegression.Pred)
+
+blr_step_aic_both(LogisticRegression, details = FALSE)
+vif(LogisticRegression)
+
+LogisticRegression1=glm(Default~ PAT.as...of.net.worth+TOL.TNW+
+                      Cash.profit.as...of.total.income+Turnover.ratio+
+                      CompanySize+Cash.profit+Cash.to.average.cost.of.sales.per.day+
+                      Profitability.assets.ratio+Debt.to.equity.ratio..times.+
+                      EPS+WIP.turnover+Debtors.turnover+
+                      Cash.to.current.liabilities..times.+Current.ratio..times.+
+                      Profitablity+Raw.material.turnover,
+                    data=data.knn.outliers,family = binomial,control = list(maxit = 1000))
+summary(LogisticRegression1)
+
+vif(LogisticRegression1)
+
+plot(as.factor(LogisticRegression1$y),LogisticRegression1$fitted.values)
+
+LogisticRegression1.pred = ifelse(LogisticRegression1$fitted.values>0.05,1,0)
+table(LogisticRegression1$y,LogisticRegression1.pred)
+
+data.knn.outliers$LR.predScore<- predict(LogisticRegression1,
+                                         data.knn.outliers, type = "response")
+data.knn.outliers$LR.predClass = ifelse(data.knn.outliers$LR.predScore>0.5,1,0)
+pred_ratio <- prediction(data.knn.outliers$LR.predScore, data.knn.outliers$Default)
+perf_ratio <- performance(pred_ratio, "tpr", "fpr")
+plot(perf_ratio,main = "ROC curve")
+
+#Concordance Ratio
+Concordance(actuals = data.knn.outliers$Def,
+            predictedScores = data.knn.outliers$LR.predScore)
+
+
+###KS
+max(perf_ratio@y.values[[1]]-perf_ratio@x.values[[1]])
+library(ineq)
+
+########### GINI
+ineq(data.knn.outliers$LR.predScore,"gini")
+
+## VALIDATION DATA RUN
+validation.data.knn$LR.predScore<- predict(LogisticRegression1.pred,
+                                           validation.data.knn,
+                                           type = "response")
+validation.data.knn$LR.predClass =
+  ifelse(validation.data.knn$LR.predScore>0.05,1,0)
+validation.data.knn$LR.predClass=as.factor(validation.data.knn$LR.predClass)
+table(validation.data.knn$Default,
+      validation.data.knn$LR.predClass)
+validation.data.knn$LR.predScore<- predict(LogisticRegression1.pred,
+                                           validation.data.knn, type = "response")
+validation.data.knn$LR.predClass = ifelse(validation.data.knn$LR.predScore>0.5,1,0)
+pred_ratio <- prediction(validation.data.knn$LR.predScore, validation.data.knn$Default)
+perf_ratio <- performance(pred_ratio, "tpr", "fpr")
+plot(perf_ratio,main = "ROC curve")
+auc(validation.data.knn$Default,validation.data.knn$LR.predScore)
+#Concordance Ratio
+Concordance(actuals = validation.data.knn$Default,
+            predictedScores = validation.data.knn$LR.predScore)
+###KS
+max(perf_ratio@y.values[[1]]-perf_ratio@x.values[[1]])
+library(ineq)
+########### GINI
+ineq(validation.data.knn$LR.predScore,"gini")
+## Analyzing Coefficients
+summary(LogisticRegression1.pred)
+exp(coef(LogisticRegression1.pred))
+## Decile Prediction
+
+table(validation.data.knn$Default,
+      validation.data.knn$LR.predClass)
+```
+
